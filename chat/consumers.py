@@ -9,7 +9,6 @@ import random, time
 game_states = dict() ##store room code, word to guess, players
 word_choices = len(ANSWER_WORDS)
 lobby_members = deque()
-print(WORDS_SET)
 ##synchronous web socket that accepts all connections, receives messages from its client, and echos those messages back to client
 ##NOW MAKING IT ASYNC - better performance, practically the same code
 
