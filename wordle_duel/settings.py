@@ -15,6 +15,8 @@ from pathlib import Path
 import os
 import logging
 
+
+
 # logging.basicConfig(level=logging.DEBUG)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -30,7 +32,8 @@ SECRET_KEY = 'django-insecure-r0q^wn4+0@#lzgqz9zav89^rg!er)itb0=jc#e#wbhjztz(ggx
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"]
+CSRF_TRUSTED_ORIGINS = ["http://wordle-duels.onrender.com", "https://wordle-duels.onrender.com"]
 
 
 # Application definition
@@ -143,7 +146,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)]
+            "hosts": [env("127.0.0.1", 6379)]
         }
     }
 }
