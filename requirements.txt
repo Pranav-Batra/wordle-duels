@@ -11,6 +11,7 @@ constantly==23.10.4
 crispy-bootstrap4==2025.6
 cryptography==45.0.7
 daphne==4.2.1
+dj-database-url==3.0.1
 Django==5.2.5
 django-crispy-forms==2.4
 django-filter==25.1
@@ -26,6 +27,7 @@ jmespath==1.0.1
 msgpack==1.1.1
 packaging==25.0
 pillow==11.3.0
+psycopg2-binary==2.9.9
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycparser==2.23
