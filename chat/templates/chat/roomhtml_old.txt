@@ -1,0 +1,282 @@
+<!-- chat/templates/chat/room.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Chat Room</title>
+</head>
+<body>
+    <textarea id="chat-log" cols="100" rows="20"></textarea><br>
+    <input id="chat-message-input" type="text" size="100"><br> <!--button and text box for input-->
+    <input id="chat-message-submit" type="button" value="Send">
+    {{ room_name|json_script:"room-name" }}
+    <script>
+        const roomName = JSON.parse(document.getElementById('room-name').textContent); //storing room name
+
+        const chatSocket = new WebSocket(
+            'ws://'
+            + window.location.host
+            + '/ws/chat/'
+            + roomName
+            + '/'
+        );
+        //creates websocket originating from current url
+        chatSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            console.log('Data: ' + data);
+            if (data.word_choice)
+        {
+            document.querySelector('#chat-log').value += ('Word Selected: ' + data.word_choice + '\n');
+        }
+        else
+        {
+            document.querySelector('#chat-log').value += (data.message + '\n');
+        }
+        };
+        //on message listener waits for message from server, when it gets it parses it and logs it to a textarea called chatlog
+        chatSocket.onclose = function(e) {
+            console.error('Chat socket closed unexpectedly');
+        };
+        //on close listener console errors when the socket closes
+
+        document.querySelector('#chat-message-input').focus();
+        document.querySelector('#chat-message-input').onkeyup = function(e) {
+            if (e.key === 'Enter') {  // enter, return
+                document.querySelector('#chat-message-submit').click();
+            }
+        };
+        //on enter key, it will execute click which gets input value
+
+        document.querySelector('#chat-message-submit').onclick = function(e) {
+            const messageInputDom = document.querySelector('#chat-message-input');
+            const message = messageInputDom.value;
+            chatSocket.send(JSON.stringify({
+                'message': message
+            }));
+            messageInputDom.value = '';
+        };
+        //chatSocket.send gets input value from above click event and sends it to the server
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+ROOM OLD VERSION TWO
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Wordle Room</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .wordle-grid {
+            display: grid;
+            grid-template-rows: repeat(6, 1fr);
+            grid-gap: 5px;
+            padding: 10px;
+        }
+        .wordle-row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-gap: 5px;
+        }
+        .wordle-box {
+            width: 60px;
+            height: 60px;
+            background-color: #3a3a3c;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            font-weight: bold;
+            text-transform: uppercase;
+            border: 2px solid #6b6b6b;
+        }
+        .wordle-box.correct {
+            background-color: #6aaa64; /* Green */
+            border-color: #6aaa64;
+        }
+        .wordle-box.present {
+            background-color: #c9b458; /* Yellow */
+            border-color: #c9b458;
+        }
+        .wordle-box.absent {
+            background-color: #787c7e; /* Gray */
+            border-color: #787c7e;
+        }
+        .input-container {
+            margin-top: 20px;
+            display: flex;
+        }
+        #chat-message-input {
+            padding: 10px;
+            font-size: 1.2em;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        #chat-message-submit {
+            padding: 10px 20px;
+            margin-left: 10px;
+            font-size: 1.2em;
+            border: none;
+            background-color: #6aaa64;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #chat-log {
+            width: 100%;
+            height: 100px;
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 1em;
+            resize: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Wordle Room</h1>
+    <div class="wordle-grid">
+        <div class="wordle-row" id="row-0"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-1"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-2"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-3"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-4"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-5"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+    </div>
+
+    <div class="wordle-grid" id="opponent-grid">
+        <div class="wordle-row" id="row-0"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-1"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-2"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-3"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-4"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+        <div class="wordle-row" id="row-5"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+    </div>
+
+    <div class="input-container">
+        <input id="chat-message-input" type="text" size="100" maxlength="5">
+        <input id="chat-message-submit" type="button" value="Guess">
+    </div>
+    
+    <textarea id="chat-log" cols="100" rows="5" readonly></textarea>
+
+    {{ room_name|json_script:"room-name" }}
+    <script>
+        const roomName = JSON.parse(document.getElementById('room-name').textContent);
+        const chatSocket = new WebSocket(
+            'ws://'
+            + window.location.host
+            + '/ws/'
+            + roomName
+            + '/'
+        );
+
+        let currentRow = 0;
+
+        chatSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            if (data.word_choice) 
+            {
+                console.log('Word Selected: ' + data.word_choice)
+                // document.querySelector('#chat-log').value += ('Word Selected: ' + data.word_choice + '\n');
+            }
+            else if (data.message)
+            {
+                console.log("Room already has a word: " + data.message)
+            } 
+            else if (data.type === "game.update_dom")
+            {
+                if (data.guess === "invalid_guess")
+                {
+                    alert("Invalid word.")
+                }
+                else
+                {
+                    const guess = data.guess;
+                    const row = document.getElementById(`row-${currentRow}`);
+                    const val_pattern = data.how_to_update_dom;
+                    const val_keys = Object.keys(val_pattern);
+                
+                    // Ensure the message is exactly 5 letters long before displaying
+                    if (guess.length === 5) 
+                    {
+                        for (let i = 0; i < 5; i++) 
+                        {
+                            row.children[i].textContent = guess[i];
+                            const box = row.children[i];
+                            const letterResult = val_pattern[val_keys[i]];
+
+                            if (letterResult === 'correct') 
+                            {
+                                box.classList.add('correct');
+                            } 
+                            else if (letterResult === 'present') 
+                            {
+                                box.classList.add('present');
+                            } 
+                            else 
+                            {
+                                box.classList.add('absent');
+                            }
+                        }
+                        currentRow++;
+                    } 
+                    if (data.how_to_update_dom === "solved")
+                    {
+                        alert("SOLVED!")
+                    }
+                }
+            }
+            if (data.type == 'game.update_secondary_dom')
+            {
+                console.log("I RECEIVED THIS MESSAGE BUT I DID NOT SEND IT.")
+            }
+            // else if (data.error && currentRow < 6) 
+            // {
+            //     alert("Invalid word.") 
+            // }
+            // else if (data.solved && currentRow < 6)
+            // {
+            //     alert("SOLVED!")
+            // }
+        
+        };
+
+        chatSocket.onclose = function(e) {
+            console.error('Chat socket closed unexpectedly');
+        };
+
+        document.querySelector('#chat-message-input').focus();
+        document.querySelector('#chat-message-input').onkeyup = function(e) {
+            if (e.key === 'Enter') {
+                document.querySelector('#chat-message-submit').click();
+            }
+        };
+
+        document.querySelector('#chat-message-submit').onclick = function(e) {
+            const messageInputDom = document.querySelector('#chat-message-input');
+            const message = messageInputDom.value;
+            chatSocket.send(JSON.stringify({
+                'message': message
+            }));
+            messageInputDom.value = '';
+        };
+    </script>
+</body>
+</html>

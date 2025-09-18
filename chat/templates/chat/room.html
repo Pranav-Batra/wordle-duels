@@ -1,0 +1,276 @@
+{% extends "chat/base.html" %}
+{% block content %}
+<head>
+    <meta charset="utf-8"/>
+    <title style="text-align: center;">Wordle Duel</title>
+    <div id="alert-container">
+        <div id="status-alert" class="alert-message"></div>
+    </div>  
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin-top: 40px;
+            background-color: #f0f0f0;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px; /* space between title and grids */
+        }
+        .game-container {
+            display: flex;
+            justify-content: center;
+            gap: 50px; /* Space between the two grids */
+        }
+        .board-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        }
+        .board-container h2 {
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .wordle-grid {
+            display: grid;
+            grid-template-rows: repeat(6, 1fr);
+            grid-gap: 5px;
+            padding: 10px;
+        }
+        .wordle-row {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            grid-gap: 5px;
+        }
+        .wordle-box {
+            width: 60px;
+            height: 60px;
+            background-color: #3a3a3c;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            font-weight: bold;
+            text-transform: uppercase;
+            border: 2px solid #6b6b6b;
+        }
+        .wordle-box.correct {
+            background-color: #6aaa64; /* Green */
+            border-color: #6aaa64;
+        }
+        .wordle-box.present {
+            background-color: #c9b458; /* Yellow */
+            border-color: #c9b458;
+        }
+        .wordle-box.absent {
+            background-color: #787c7e; /* Gray */
+            border-color: #787c7e;
+        }
+        .input-container {
+            margin-top: 20px;
+            display: flex;
+        }
+        #chat-message-input {
+            padding: 10px;
+            font-size: 1.2em;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        #chat-message-submit {
+            padding: 10px 20px;
+            margin-left: 10px;
+            font-size: 1.2em;
+            border: none;
+            background-color: #6aaa64;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #chat-log {
+            width: 100%;
+            height: 100px;
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 1em;
+            resize: none;
+        }
+        /* Add these styles to your <style> block */
+        #alert-container {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 100;
+        }
+
+        .alert-message {
+            padding: 15px 25px;
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            font-size: 1.5em;
+            font-weight: bold;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            display: none; /* Hidden by default */
+        }
+    </style>
+</head>
+<body>
+    <h1>Wordle Duel</h1>
+    <div class="game-container">
+        <div class="board-container">
+            <h2>Your Guesses</h2>
+            <div class="wordle-grid">
+                <div class="wordle-row" id="my-row-0"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="my-row-1"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="my-row-2"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="my-row-3"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="my-row-4"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="my-row-5"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+            </div>
+        </div>
+
+        <div class="board-container">
+            <h2>Others' Guesses</h2>
+            <div class="wordle-grid" id="opponent-grid">
+                <div class="wordle-row" id="opponent-row-0"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="opponent-row-1"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="opponent-row-2"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="opponent-row-3"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="opponent-row-4"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+                <div class="wordle-row" id="opponent-row-5"><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div><div class="wordle-box"></div></div>
+            </div>
+        </div>
+    </div>
+    <div class="input-container">
+        <input id="chat-message-input" type="text" size="100" maxlength="5">
+        <input id="chat-message-submit" type="button" value="Guess">
+    </div>
+    {{ room_name|json_script:"room-name" }}
+    <script>
+        /* Add this function for showing temporary alerts */
+        function showAlert(message) {
+            const alertDiv = document.getElementById('status-alert');
+            alertDiv.textContent = message;
+            alertDiv.style.display = 'block';
+
+            // Hide the alert after 1 second
+            setTimeout(() => {
+                alertDiv.style.display = 'none';
+            }, 300);
+        }
+
+        /* Add this function for showing persistent win/loss messages */
+        function showGameStatus(message) {
+            const alertDiv = document.getElementById('status-alert');
+            alertDiv.textContent = message;
+            alertDiv.style.display = 'block';
+            
+            // Do not hide this message automatically
+        }
+        const roomName = JSON.parse(document.getElementById('room-name').textContent);
+        const chatSocket = new WebSocket(
+            'ws://'
+            + window.location.host
+            + '/ws/room/'
+            + roomName
+            + '/'
+        );
+
+        let myCurrentRow = 0;
+        let opponentCurrentRow = 0;
+
+        chatSocket.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+
+            if (data.type === "game.update_dom") 
+            {
+                // This message is for YOUR grid
+                const guess = data.guess;
+                const val_pattern = data.how_to_update_dom;
+                
+                if (data.guess === "invalid_guess") 
+                {
+                    showAlert("Invalid word.");
+                } 
+                else 
+                {
+                    const myRow = document.getElementById(`my-row-${myCurrentRow}`);
+                    if (guess.length === 5) 
+                    {
+                        for (let i = 0; i < 5; i++) {
+                            const box = myRow.children[i];
+                            box.textContent = guess[i];
+                            const letterResult = val_pattern[Object.keys(val_pattern)[i]];
+                            box.classList.add(letterResult);
+                        }
+                        myCurrentRow++;
+                    }
+                    if ("winner" in data) 
+                    {
+                        showGameStatus("Congrats! YOU WIN!");
+                    }
+                }
+            } 
+            else if (data.word_choice) 
+            {
+                console.log('Word Selected: ' + data.word_choice);
+            } 
+            else if (data.message) 
+            {
+                console.log("Room already has a word: " + data.message);
+            }
+            if (data.type === 'game.update_secondary_dom') 
+            {
+                // This message is for the OPPONENT'S grid
+                const guess = data.guess;
+                const val_pattern = data.how_to_update_dom;
+                
+                const opponentRow = document.getElementById(`opponent-row-${opponentCurrentRow}`);
+                for (let i = 0; i < 5; i++) 
+                {
+                    const box = opponentRow.children[i];
+                    const letterResult = val_pattern[Object.keys(val_pattern)[i]];
+                    box.classList.add(letterResult);
+                }
+                if ("winner" in data)
+                {
+                    showGameStatus("Game Over. You Lost.")
+                }
+                opponentCurrentRow++;
+            } 
+        };
+
+        chatSocket.onclose = function(e) 
+        {
+            console.error('Chat socket closed unexpectedly');
+            setTimeout(() => {
+                alert("Going back to home page.")
+                window.location.pathname = '/'}, 500);
+        };
+
+        document.querySelector('#chat-message-input').focus();
+        document.querySelector('#chat-message-input').onkeyup = function(e) {
+            if (e.key === 'Enter') {
+                document.querySelector('#chat-message-submit').click();
+            }
+        };
+
+        document.querySelector('#chat-message-submit').onclick = function(e) {
+            const messageInputDom = document.querySelector('#chat-message-input');
+            const message = messageInputDom.value;
+            chatSocket.send(JSON.stringify({
+                'message': message
+            }));
+            messageInputDom.value = '';
+        };
+    </script>
+</body>
+{% endblock %}

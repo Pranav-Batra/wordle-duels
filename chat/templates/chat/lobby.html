@@ -1,0 +1,22 @@
+{% extends "chat/base.html" %}
+{% block content %}
+<h1>WAITING FOR GAME</h1>
+<script>
+    const lobbySocket = new WebSocket(
+        'ws://'
+        + window.location.host
+        + '/'
+        + 'ws/lobby/'
+);
+    lobbySocket.onmessage = function(e) {
+        const data = JSON.parse(e.data)
+        room_name = data.room_name
+        window.location.pathname = '/room/' + room_name + '/'
+    }
+
+</script>
+
+
+
+{% endblock %}
+
