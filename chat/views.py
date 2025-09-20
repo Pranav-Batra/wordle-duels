@@ -9,10 +9,10 @@ def index(request):
     return render(request, 'chat/index.html')
 
 @login_required
-def room(request, room_name):
-    return render(request, 'chat/room.html', context={'room_name': room_name})
+def room(request, game_type, room_name):
+    return render(request, 'chat/room.html', context={'room_name': room_name, 'game_type': game_type})
 
 @login_required
 def lobby(request):
     return render(request, 'chat/lobby.html')
-##sends room name as json to javascript
+

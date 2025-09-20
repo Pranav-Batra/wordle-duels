@@ -154,6 +154,7 @@
         <input id="chat-message-submit" type="button" value="Guess">
     </div>
     {{ room_name|json_script:"room-name" }}
+    {{ game_type|json_script:"game-type" }}
     <script>
         /* Add this function for showing temporary alerts */
         function showAlert(message) {
@@ -176,11 +177,14 @@
             // Do not hide this message automatically
         }
         const roomName = JSON.parse(document.getElementById('room-name').textContent);
+        const gameType = JSON.parse(document.getElementById('game-type').textContent)
         const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
         const chatSocket = new WebSocket(
             wsProtocol
             + window.location.host
             + '/ws/room/'
+            + gameType
+            + '/'
             + roomName
             + '/'
         );
@@ -214,9 +218,16 @@
                         }
                         myCurrentRow++;
                     }
-                    if ("winner" in data) 
+                    if ("winner" in data)
                     {
-                        showGameStatus("Congrats! YOU WIN!");
+                        if (data.winner === true)
+                        {
+                            showGameStatus("Congrats! YOU WIN!")
+                        }
+                        else
+                        {
+                            showGameStatus("Game Over. You Lost.")
+                        }
                     }
                 }
             } 
@@ -243,7 +254,14 @@
                 }
                 if ("winner" in data)
                 {
-                    showGameStatus("Game Over. You Lost.")
+                    if (data.winner === true)
+                    {
+                        showGameStatus("Congrats! YOU WIN!")
+                    }
+                    else
+                    {
+                        showGameStatus("Game Over. You Lost.")
+                    }
                 }
                 opponentCurrentRow++;
             } 
