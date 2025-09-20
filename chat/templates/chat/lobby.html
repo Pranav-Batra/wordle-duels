@@ -3,15 +3,18 @@
 <h1>WAITING FOR GAME</h1>
 <script>
     const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const gameType = window.location.pathname.split('/')[2];
     const lobbySocket = new WebSocket(
         wsProtocol
         + window.location.host        
-        + '/ws/lobby/'
+        + `/ws/lobby/${gameType}/`
+
 );
     lobbySocket.onmessage = function(e) {
         const data = JSON.parse(e.data)
         room_name = data.room_name
-        window.location.pathname = '/room/' + room_name + '/'
+        game_type = data.game_type
+        window.location.pathname = '/room/' + game_type + '/' + room_name + '/'
     }
 
 </script>

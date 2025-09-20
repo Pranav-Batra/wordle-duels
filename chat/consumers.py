@@ -8,7 +8,8 @@ import random, time
 
 game_states = dict() ##store room code, word to guess, players
 word_choices = len(ANSWER_WORDS)
-lobby_members = deque()
+lobby_members_speed = deque()
+lobby_members_guess = deque()
 ##synchronous web socket that accepts all connections, receives messages from its client, and echos those messages back to client
 ##NOW MAKING IT ASYNC - better performance, practically the same code
 
@@ -17,8 +18,19 @@ lobby_members = deque()
 class LobbyConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = self.scope['user']
+        self.game_type = self.scope['url_route']['kwargs']['mode']
         self.lobby_name = 'global_lobby'
-        lobby_members.append((self.user, self.channel_name, self.user.id))
+        if self.game_type == 'speed':
+            self.lobby_name = 'lobby_speed'
+            lobby_members_speed.append((self.user, self.channel_name, self.user.id))
+        else:
+            self.lobby_name = 'lobby_guess'
+            lobby_members_guess.append((self.user, self.channel_name, self.user.id))
+        
+        await self.channel_layer.group_add(
+            self.lobby_name, 
+            self.channel_name
+        )
 
         await self.channel_layer.group_add(
             f'user_{self.user.id}',
@@ -26,13 +38,13 @@ class LobbyConsumer(AsyncWebsocketConsumer):
         )
         await self.accept()
         print('WE ARE NOW CONNECTED.')
-        print(f'DEQUE: {lobby_members}')
+        print(f'DEQUE: {lobby_members_speed}')
 
         ##polling lobby queue -> send message to everyone in lobby -> they will be rerouted -> send them the room we create
-        if len(lobby_members) > 1:
+        if len(lobby_members_speed) > 1:
             print(f'WE ARE CHECKING FOR LOBBY MEMBERS LENGTH.')
-            player_1 = lobby_members.pop()
-            player_2 = lobby_members.pop()
+            player_1 = lobby_members_speed.pop()
+            player_2 = lobby_members_speed.pop()
 
             room_name = f"{random.randint(0, 999)}_{int(time.time() * 1000)}"
 
@@ -40,7 +52,8 @@ class LobbyConsumer(AsyncWebsocketConsumer):
                 f'user_{player_1[2]}',
                 {
                     "type": "game.start",
-                    "room_name": room_name
+                    "room_name": room_name,
+                    "game_type": self.game_type
                 }
             )
 
@@ -48,16 +61,45 @@ class LobbyConsumer(AsyncWebsocketConsumer):
                 f'user_{player_2[2]}',
                 {
                     "type": "game.start",
-                    "room_name": room_name
+                    "room_name": room_name,
+                    "game_type": self.game_type
                 }
             )
-        print(lobby_members)
+
+        if len(lobby_members_guess) > 1:
+            print(f'WE ARE CHECKING FOR LOBBY MEMBERS LENGTH.')
+            player_1 = lobby_members_guess.pop()
+            player_2 = lobby_members_guess.pop()
+
+            room_name = f"{random.randint(0, 999)}_{int(time.time() * 1000)}"
+
+            await self.channel_layer.group_send(
+                f'user_{player_1[2]}',
+                {
+                    "type": "game.start",
+                    "room_name": room_name,
+                    "game_type": self.game_type
+                }
+            )
+
+            await self.channel_layer.group_send(
+                f'user_{player_2[2]}',
+                {
+                    "type": "game.start",
+                    "room_name": room_name,
+                    "game_type": self.game_type
+                }
+            )
+        print(lobby_members_guess)
+
 
     async def disconnect(self, close_code):
-        for member in list(lobby_members):
+        for member in list(lobby_members_speed):
             if member[2] == self.user.id:
-                lobby_members.remove(member)
-        print(f'AFTER DISCONNECTION: {lobby_members}')
+                lobby_members_speed.remove(member)
+        for member in list(lobby_members_guess):
+            if member[2] == self.user.id:
+                lobby_members_guess.remove(member)
         await self.channel_layer.group_discard(f'user_{self.user.id}', self.channel_name)
 
 
@@ -254,6 +296,7 @@ class GuessCountGameConsumer(AsyncWebsocketConsumer):
         message = text_data_json['message']
 
         #send message to room group
+        
         if not self.validate_guess(message):
             await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", "guess": "invalid_guess"})
         elif game_states[self.room_name]['players']['player1'].username == self.user.username and game_states[self.room_name]['turn'] == 'p2':
@@ -285,6 +328,29 @@ class GuessCountGameConsumer(AsyncWebsocketConsumer):
                                                                        "how_to_update_dom": 
                                                                        self.validation_pattern(message, game_states[self.room_name]['word_choice']),
                                                                        "sender": self.channel_name})
+        elif game_states[self.room_name]['p1_solved'] and game_states[self.room_name]['turn'] == 'p2' and message == game_states[self.room_name]['word_choice']:
+            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_dom", 
+                                                              "guess": message, 
+                                                              "how_to_update_dom": 
+                                                              self.validation_pattern(message, game_states[self.room_name]['word_choice']),
+                                                              "draw": True})
+            del game_states[self.room_name]
+            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
+            print("Draw!")
+        elif game_states[self.room_name]['p1_solved'] and game_states[self.room_name]['turn'] == 'p2' and message != game_states[self.room_name]['word_choice']:
+            await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", 
+                                                              "guess": message, 
+                                                              "how_to_update_dom": 
+                                                              self.validation_pattern(message, game_states[self.room_name]['word_choice']),
+                                                              "winner": False})
+            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
+                                                                       "how_to_update_dom": 
+                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
+                                                                       "sender": self.channel_name,
+                                                                       "winner": True}) ##everyone BUT the sender gets this update
+            del game_states[self.room_name]
+            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
+            print("Solved!")
         elif message == game_states[self.room_name]['word_choice'] and game_states[self.room_name]['turn'] == 'p2':
             await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", 
                                                               "guess": message, 
@@ -299,21 +365,8 @@ class GuessCountGameConsumer(AsyncWebsocketConsumer):
             del game_states[self.room_name]
             await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
             print("Solved!")
-        elif game_states[self.room_name]['p1_solved'] and game_states[self.room_name]['turn'] == 'p2' and message != game_states[self.room_name]['word_choice']:
-            print("PLAYER 1 SOLVED AND NOW ITS P2 TURN")
-            await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", 
-                                                              "guess": message, 
-                                                              "how_to_update_dom": 
-                                                              self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                              "winner": False})
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
-                                                                       "how_to_update_dom": 
-                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                                       "sender": self.channel_name,
-                                                                       "winner": True}) ##everyone BUT the sender gets this update
-            del game_states[self.room_name]
-            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
-            print("Solved!")
+       
+
 
         
     async def chat_message(self, event):

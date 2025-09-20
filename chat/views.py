@@ -13,6 +13,6 @@ def room(request, game_type, room_name):
     return render(request, 'chat/room.html', context={'room_name': room_name, 'game_type': game_type})
 
 @login_required
-def lobby(request):
-    return render(request, 'chat/lobby.html')
+def lobby(request, game_type):
+    return render(request, 'chat/lobby.html', context={'game_type': game_type})
 

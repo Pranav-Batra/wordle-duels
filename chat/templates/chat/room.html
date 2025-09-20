@@ -229,6 +229,10 @@
                             showGameStatus("Game Over. You Lost.")
                         }
                     }
+                    if ("draw" in data)
+                    {
+                        showGameStatus("DRAW.")
+                    }
                 }
             } 
             else if (data.word_choice) 

@@ -6,5 +6,5 @@ urlpatterns = [
     # path('admin/', admin.site.urls),
     path('', views.index, name='chat-home'),
     path('room/<str:game_type>/<str:room_name>/', views.room, name='room'),
-    path('lobby/', views.lobby, name='lobby')
+    path('lobby/<str:game_type>/', views.lobby, name='lobby')
 ]
