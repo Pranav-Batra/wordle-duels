@@ -1,30 +1,68 @@
 {% extends "chat/base.html" %}
 
 {% block content %}
-<div class="room-buttons text-center mt-5">
-    <button id="room-name-host-private" class="btn btn-primary btn-lg">Host Private Room</button>
-    <button id="room-name-join-private" class="btn btn-secondary btn-lg">Join Private Room</button>
-    <button id="room-name-join-public" class="btn btn-primary btn-lg">Join Public Room</button>
+<div class="container text-center mt-5">
+
+    <h2>Select Game Mode</h2>
+    <div class="mb-4">
+        <label>
+            <input type="radio" name="game_mode" value="guess"> Guess
+        </label>
+        <label class="ml-3">
+            <input type="radio" name="game_mode" value="speed"> Speed
+        </label>
+    </div>
+
+    <div class="room-buttons">
+        <button id="room-name-host-private" class="btn btn-primary btn-lg mb-2">Host Private Room</button><br>
+        <button id="room-name-join-private" class="btn btn-secondary btn-lg mb-2">Join Private Room</button><br>
+        <button id="room-name-join-public" class="btn btn-primary btn-lg">Join Public Room</button>
+    </div>
+
 </div>
 
 <script>
+    // Helper to get selected game mode
+    function getSelectedGameMode() {
+        const radios = document.getElementsByName('game_mode');
+        for (let i = 0; i < radios.length; i++) {
+            if (radios[i].checked) return radios[i].value;
+        }
+        return null; // return null if nothing selected
+    }
+
+    function requireGameModeAndRedirect(callback) {
+        const gameMode = getSelectedGameMode();
+        if (!gameMode) {
+            alert("Please select a game mode before continuing.");
+            return;
+        }
+        callback(gameMode);
+    }
+
     // Host Private Room
     document.getElementById('room-name-host-private').addEventListener('click', function() {
-        const roomName = Math.floor(Math.random() * 1000) + '_' + Date.now();
-        window.location.pathname = '/room/' + roomName + '/';
+        requireGameModeAndRedirect((gameMode) => {
+            const roomName = Math.floor(Math.random() * 1000) + '_' + Date.now();
+            window.location.pathname = `/room/${gameMode}/${roomName}/`;
+        });
     });
 
     // Join Private Room
     document.getElementById('room-name-join-private').addEventListener('click', function() {
-        const roomName = prompt("Enter the private room name:");
-        if (roomName) {
-            window.location.pathname = '/room/' + roomName + '/';
-        }
+        requireGameModeAndRedirect((gameMode) => {
+            const roomName = prompt("Enter the private room name:");
+            if (roomName) {
+                window.location.pathname = `/room/${gameMode}/${roomName}/`;
+            }
+        });
     });
 
+    // Join Public Room / Lobby
     document.getElementById('room-name-join-public').addEventListener('click', function() {
-        window.location.pathname = '/lobby/';
-    })
+        requireGameModeAndRedirect((gameMode) => {
+            window.location.pathname = `/lobby/${gameMode}/`;
+        });
+    });
 </script>
 {% endblock %}
-

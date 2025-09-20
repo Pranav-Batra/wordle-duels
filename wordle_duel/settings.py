@@ -31,7 +31,7 @@ redis_url = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
 SECRET_KEY = 'django-insecure-r0q^wn4+0@#lzgqz9zav89^rg!er)itb0=jc#e#wbhjztz(ggx'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ["*"]
 CSRF_TRUSTED_ORIGINS = ["http://wordle-duels.onrender.com", "https://wordle-duels.onrender.com"]

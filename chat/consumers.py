@@ -37,8 +37,8 @@ class LobbyConsumer(AsyncWebsocketConsumer):
             self.channel_name
         )
         await self.accept()
-        print('WE ARE NOW CONNECTED.')
-        print(f'DEQUE: {lobby_members_speed}')
+        # print('WE ARE NOW CONNECTED.')
+        # print(f'DEQUE: {lobby_members_speed}')
 
         ##polling lobby queue -> send message to everyone in lobby -> they will be rerouted -> send them the room we create
         if len(lobby_members_speed) > 1:
