@@ -8,6 +8,9 @@ You will be able to host private rooms or compete publically on release.
 ## End Game
 <img width="1440" height="900" alt="Screenshot 2025-09-15 at 10 45 15 PM" src="https://github.com/Pranav-Batra/wordle-duels/blob/b5d1b21d9aac466dee48b9bb396de3c9d2bfe5d5/screenshot2.png" />
 
+## Demo Video
+https://github.com/user-attachments/assets/62be3c81-b664-46c6-8433-0294b2d9717f
+
 ## Tech Stack
 This is built using django-channels which allows for non-http protocols and JS WebSocket integration. 
 
