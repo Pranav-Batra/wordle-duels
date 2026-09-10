@@ -1,387 +1,298 @@
 import json
-from asgiref.sync import async_to_sync
 from channels.generic.websocket import AsyncWebsocketConsumer
-from collections import deque
-from .word_list import WORDS_SET, WORDS_LIST, ANSWER_WORDS
-import random, time
+from .word_list import WORDS_SET, ANSWER_WORDS
+from . import game_store
+import random
 
 
-game_states = dict() ##store room code, word to guess, players
 word_choices = len(ANSWER_WORDS)
-lobby_members_speed = deque()
-lobby_members_guess = deque()
-##synchronous web socket that accepts all connections, receives messages from its client, and echos those messages back to client
-##NOW MAKING IT ASYNC - better performance, practically the same code
 
-##every time someone JOINS the lobby -> we check if there is someone else waiting -> if so , they get paired and shipped to a game room
-##else, wait
+# Shared game and lobby state now lives in Redis (see chat/game_store.py) so it
+# is consistent across worker processes and survives restarts. The consumers
+# below hold no cross-request state of their own.
+
+
+def _pick_word():
+    return ANSWER_WORDS[random.randint(0, word_choices - 1)]
+
+
+##every time someone JOINS the lobby -> we check if there is someone else waiting
+##-> if so, they get paired and shipped to a game room; else, wait.
 class LobbyConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = self.scope['user']
         self.game_type = self.scope['url_route']['kwargs']['mode']
-        self.lobby_name = 'global_lobby'
-        if self.game_type == 'speed':
-            self.lobby_name = 'lobby_speed'
-            lobby_members_speed.append((self.user, self.channel_name, self.user.id))
-        else:
-            self.lobby_name = 'lobby_guess'
-            lobby_members_guess.append((self.user, self.channel_name, self.user.id))
-        
-        await self.channel_layer.group_add(
-            self.lobby_name, 
-            self.channel_name
-        )
 
-        await self.channel_layer.group_add(
-            f'user_{self.user.id}',
-            self.channel_name
-        )
+        # Per-user group is how we deliver the "your match is ready" message,
+        # regardless of which worker the two players connected to.
+        await self.channel_layer.group_add(f'user_{self.user.id}', self.channel_name)
         await self.accept()
-        # print('WE ARE NOW CONNECTED.')
-        # print(f'DEQUE: {lobby_members_speed}')
 
-        ##polling lobby queue -> send message to everyone in lobby -> they will be rerouted -> send them the room we create
-        if len(lobby_members_speed) > 1:
-            print(f'WE ARE CHECKING FOR LOBBY MEMBERS LENGTH.')
-            player_1 = lobby_members_speed.pop()
-            player_2 = lobby_members_speed.pop()
-
-            room_name = f"{random.randint(0, 999)}_{int(time.time() * 1000)}"
-
-            await self.channel_layer.group_send(
-                f'user_{player_1[2]}',
-                {
-                    "type": "game.start",
-                    "room_name": room_name,
-                    "game_type": self.game_type
-                }
-            )
-
-            await self.channel_layer.group_send(
-                f'user_{player_2[2]}',
-                {
-                    "type": "game.start",
-                    "room_name": room_name,
-                    "game_type": self.game_type
-                }
-            )
-
-        if len(lobby_members_guess) > 1:
-            print(f'WE ARE CHECKING FOR LOBBY MEMBERS LENGTH.')
-            player_1 = lobby_members_guess.pop()
-            player_2 = lobby_members_guess.pop()
-
-            room_name = f"{random.randint(0, 999)}_{int(time.time() * 1000)}"
-
-            await self.channel_layer.group_send(
-                f'user_{player_1[2]}',
-                {
-                    "type": "game.start",
-                    "room_name": room_name,
-                    "game_type": self.game_type
-                }
-            )
-
-            await self.channel_layer.group_send(
-                f'user_{player_2[2]}',
-                {
-                    "type": "game.start",
-                    "room_name": room_name,
-                    "game_type": self.game_type
-                }
-            )
-        print(lobby_members_guess)
-
+        match = await game_store.enqueue_and_match(self.game_type, self.user.id)
+        if match:
+            room_name, id_a, id_b = match
+            for uid in (id_a, id_b):
+                await self.channel_layer.group_send(
+                    f'user_{uid}',
+                    {
+                        "type": "game.start",
+                        "room_name": room_name,
+                        "game_type": self.game_type,
+                    },
+                )
 
     async def disconnect(self, close_code):
-        for member in list(lobby_members_speed):
-            if member[2] == self.user.id:
-                lobby_members_speed.remove(member)
-        for member in list(lobby_members_guess):
-            if member[2] == self.user.id:
-                lobby_members_guess.remove(member)
+        await game_store.leave_lobby(self.game_type, self.user.id)
         await self.channel_layer.group_discard(f'user_{self.user.id}', self.channel_name)
 
-
     async def game_start(self, event):
-        await self.send(text_data = json.dumps(event))
-    
+        await self.send(text_data=json.dumps(event))
+
+
 class GameConsumer(AsyncWebsocketConsumer):
+    """Speed mode: both players race the same word; first to solve wins."""
+
     def validate_guess(self, guess):
         return guess in WORDS_SET
-    
+
     def validation_pattern(self, guess, actual):
-        #first - guess
-        #crash - actual
+        # Standard Wordle coloring: two passes with letter counts so that
+        # duplicate letters are colored correctly.
+        #   guess  - what the player typed
+        #   actual - the answer
         validation_info = dict()
+        remaining = dict()  # answer letters still available to match as 'present'
+
+        # Pass 1: exact position matches ('correct'); tally the rest of the answer.
+        for i in range(len(guess)):
+            if guess[i] == actual[i]:
+                validation_info[f'letter_{i}'] = 'correct'
+            else:
+                remaining[actual[i]] = remaining.get(actual[i], 0) + 1
+
+        # Pass 2: 'present' only while an unmatched copy of the letter remains.
         for i in range(len(guess)):
             cur_letter = f'letter_{i}'
-            for j in range(len(actual)):
-                if guess[i] == actual[j]:
-                    if i == j:
-                        validation_info[cur_letter] = 'correct'
-                        break
-                    elif i != j:
-                        validation_info[cur_letter] = 'present'
-            if cur_letter not in validation_info:
+            if cur_letter in validation_info:
+                continue
+            if remaining.get(guess[i], 0) > 0:
+                validation_info[cur_letter] = 'present'
+                remaining[guess[i]] -= 1
+            else:
                 validation_info[cur_letter] = 'absent'
-        
+
         return validation_info
 
-
     async def connect(self):
-        print(len(WORDS_SET))
-        print(len(ANSWER_WORDS))
-        print(f'game_state currently: {game_states}')
-        self.room_name = self.scope['url_route']['kwargs']['room_name'] ##obtians room_name parameter from URL route
+        self.room_name = self.scope['url_route']['kwargs']['room_name']
         self.user = self.scope['user']
-        self.room_group_name = f'chat_{self.room_name}' #constructs Channels group name directly from room name
-        #Join room group
+        self.room_group_name = f'chat_{self.room_name}'
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        print('channel layer sent')
-        if self.room_name in game_states:
-            if game_states[self.room_name]['players']['player1'] != '' and game_states[self.room_name]['players']['player2'] != '':
-                return
+
+        role = await game_store.create_or_join(self.room_name, _pick_word(), 'speed', self.user.username)
+        if role is None:
+            # Room already has two players; refuse this connection.
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+            await self.close()
+            return
+
         await self.accept()
-        print(f'chnl: {self.channel_name}')
-        print(f'room: {self.room_name}')
-        print(f'group: {self.room_group_name}')
-        print(f'user logged in: {self.user}')
-        print('user', self.user)
+        # NB: never send the answer to the client. Only a connect ack.
+        await self.send(text_data=json.dumps({"status": "connected", "player": role}))
 
-        if self.room_name not in game_states:
-            word_choice = random.randint(0, word_choices - 1)
-            word_choice = ANSWER_WORDS[word_choice]
-            print('Word choice: ', word_choice)
-            game_states[self.room_name] = {'word_choice': word_choice, 'players': {'player1': '', 'player2': ''}, 'game_type': 'speed'}
-            game_states[self.room_name]['players']['player1'] = self.user
-            await self.send(text_data = json.dumps({"word_choice": word_choice}))
-        else:
-            already_chosen_word = game_states[self.room_name]['word_choice']
-            game_states[self.room_name]['players']['player2'] = self.user
-            await self.send(text_data = json.dumps({"message": already_chosen_word})) 
-        print(f'game states after joining: {game_states}')
-        # print(f'{game_states[self.room_name]['players']['player1'].username}')
-        
-     ##accepts websocket connection(may want to turn this off if user is not authorized to accept the connection)
-
-    #leave room group
     async def disconnect(self, close_code):
-        if self.room_name in game_states:
-            if self.user.username == game_states[self.room_name]['players']['player1'].username:
-                game_states[self.room_name]['players']['player1'] = ''
-            elif self.user.username == game_states[self.room_name]['players']['player2'].username:
-                game_states[self.room_name]['players']['player2'] = ''
+        await game_store.clear_player(self.room_name, self.user.username)
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
-
-    #receive message from websocket
     async def receive(self, text_data):
         text_data_json = json.loads(text_data)
-        message = text_data_json['message']
+        message = text_data_json.get('message', '')
+
+        game = await game_store.get_game(self.room_name)
+        if game is None:
+            return  # game already finished / cleaned up
+        word = game['word']
 
         if not self.validate_guess(message):
             await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", "guess": "invalid_guess"})
-        elif self.validate_guess(message) and message != game_states[self.room_name]['word_choice']:
-            await self.channel_layer.send(self.channel_name, 
-                                          {"type": "game.update_dom", 
-                                           "guess": message, 
-                                           "how_to_update_dom": 
-                                           self.validation_pattern(message, game_states[self.room_name]['word_choice'])})
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
-                                                                       "how_to_update_dom": 
-                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                                       "sender": self.channel_name})
-        elif message == game_states[self.room_name]['word_choice']:
-            await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", 
-                                                              "guess": message, 
-                                                              "how_to_update_dom": 
-                                                              self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                              "winner": True})
-            
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
-                                                                       "how_to_update_dom": 
-                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                                       "sender": self.channel_name,
-                                                                       "winner": False}) ##everyone BUT the sender gets this update
-            del game_states[self.room_name]
-            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
-            print("Solved!")
-        # async_to_sync(self.channel_layer.group_send)(
-        #     self.room_group_name, {"type": "chat.message", "message": message}
-        # ) #sends event to group, event. has special type corresponding to name of method that is invoked on consumers receiving this event
-        #(replaces . with _, so chat.message becomes function chat_message as seen below)
-    
-    #receive message from room group
-    async def chat_message(self, event):
-        message = event['message']
+            return
 
-        #send message to WebSocket
-        await self.send(text_data = json.dumps({"message": message}))
-    
+        pattern = self.validation_pattern(message, word)
+
+        if message != word:
+            await self.channel_layer.send(self.channel_name, {
+                "type": "game.update_dom",
+                "guess": message,
+                "how_to_update_dom": pattern,
+            })
+            await self.channel_layer.group_send(self.room_group_name, {
+                "type": "game.update_secondary_dom",
+                "how_to_update_dom": pattern,
+                "sender": self.channel_name,
+            })
+        else:
+            # Correct guess -> this player wins.
+            await self.channel_layer.send(self.channel_name, {
+                "type": "game.update_dom",
+                "guess": message,
+                "how_to_update_dom": pattern,
+                "winner": True,
+            })
+            await self.channel_layer.group_send(self.room_group_name, {
+                "type": "game.update_secondary_dom",
+                "how_to_update_dom": pattern,
+                "sender": self.channel_name,
+                "winner": False,  # everyone BUT the sender gets this update
+            })
+            await game_store.delete_game(self.room_name)
+            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
+
     async def game_update_dom(self, event):
-        await self.send(text_data = json.dumps(event))
+        await self.send(text_data=json.dumps(event))
 
     async def game_update_secondary_dom(self, event):
-        sender = event['sender']
-        if sender != self.channel_name:
-            await self.send(text_data = json.dumps(event))
+        if event['sender'] != self.channel_name:
+            await self.send(text_data=json.dumps(event))
 
     async def chat_disconnect(self, event):
         await self.close()
 
-#when user posts a message, js function transmits message over websocket to chatconsumer
-#chatconsumer receives that message and forwards it to group corresponding to the group name
-#every chat consumer int he same group/room then receives the mssage and sends it over websocket back to js
-##that message is then appended to chat log
-
 
 class GuessCountGameConsumer(AsyncWebsocketConsumer):
+    """Turn-based mode: players alternate guesses. If p1 solves, p2 gets one
+    final turn to force a draw; otherwise the first to solve wins."""
+
     def validate_guess(self, guess):
         return guess in WORDS_SET
-    
+
     def validation_pattern(self, guess, actual):
+        # Standard Wordle coloring: two passes with letter counts so that
+        # duplicate letters are colored correctly.
         validation_info = dict()
+        remaining = dict()  # answer letters still available to match as 'present'
+
+        # Pass 1: exact position matches ('correct'); tally the rest of the answer.
+        for i in range(len(guess)):
+            if guess[i] == actual[i]:
+                validation_info[f'letter_{i}'] = 'correct'
+            else:
+                remaining[actual[i]] = remaining.get(actual[i], 0) + 1
+
+        # Pass 2: 'present' only while an unmatched copy of the letter remains.
         for i in range(len(guess)):
             cur_letter = f'letter_{i}'
-            for j in range(len(actual)):
-                if guess[i] == actual[j]:
-                    if i == j:
-                        validation_info[cur_letter] = 'correct'
-                        break
-                    elif i != j:
-                        validation_info[cur_letter] = 'present'
-            if cur_letter not in validation_info:
+            if cur_letter in validation_info:
+                continue
+            if remaining.get(guess[i], 0) > 0:
+                validation_info[cur_letter] = 'present'
+                remaining[guess[i]] -= 1
+            else:
                 validation_info[cur_letter] = 'absent'
-        
+
         return validation_info
 
-
     async def connect(self):
-        self.room_name = self.scope['url_route']['kwargs']['room_name'] ##obtians room_name parameter from URL route
+        self.room_name = self.scope['url_route']['kwargs']['room_name']
         self.user = self.scope['user']
-        self.room_group_name = f'chat_{self.room_name}' #constructs Channels group name directly from room name
-        #Join room group
+        self.room_group_name = f'chat_{self.room_name}'
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        if self.room_name in game_states:
-            if game_states[self.room_name]['players']['player1'] != '' and game_states[self.room_name]['players']['player2'] != '':
-                return
+
+        role = await game_store.create_or_join(self.room_name, _pick_word(), 'guess', self.user.username, turn='p1')
+        if role is None:
+            await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+            await self.close()
+            return
+
         await self.accept()
+        # NB: never send the answer to the client. Only a connect ack.
+        await self.send(text_data=json.dumps({"status": "connected", "player": role}))
 
-        if self.room_name not in game_states:
-            word_choice = random.randint(0, word_choices - 1)
-            word_choice = ANSWER_WORDS[word_choice]
-            print('Word choice: ', word_choice)
-            game_states[self.room_name] = {'word_choice': word_choice, 'players': {'player1': '', 'player2': '', }, 'game_type': 'guess', 'turn': 'p1', 'p1_solved': False}
-            game_states[self.room_name]['players']['player1'] = self.user
-            await self.send(text_data = json.dumps({"word_choice": word_choice}))
-        else:
-            already_chosen_word = game_states[self.room_name]['word_choice']
-            game_states[self.room_name]['players']['player2'] = self.user
-            await self.send(text_data = json.dumps({"message": already_chosen_word})) 
-        print(f'game states after joining: {game_states}')
-
-    #leave room group
     async def disconnect(self, close_code):
-        if self.room_name in game_states:
-            if self.user.username == game_states[self.room_name]['players']['player1'].username:
-                game_states[self.room_name]['players']['player1'] = ''
-            elif self.user.username == game_states[self.room_name]['players']['player2'].username:
-                game_states[self.room_name]['players']['player2'] = ''
+        await game_store.clear_player(self.room_name, self.user.username)
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
 
-    #receive message from websocket
     async def receive(self, text_data):
         text_data_json = json.loads(text_data)
-        message = text_data_json['message']
+        message = text_data_json.get('message', '')
 
-        #send message to room group
-        
+        game = await game_store.get_game(self.room_name)
+        if game is None:
+            return  # game already finished / cleaned up
+
+        word = game['word']
+        turn = game['turn']
+        p1_solved = game['p1_solved']
+        username = self.user.username
+        is_p1 = game['player1'] == username
+        is_p2 = game['player2'] == username
+
+        # Reject invalid words or out-of-turn guesses.
         if not self.validate_guess(message):
             await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", "guess": "invalid_guess"})
-        elif game_states[self.room_name]['players']['player1'].username == self.user.username and game_states[self.room_name]['turn'] == 'p2':
-            print('wrong person sending word, should be p2')
+            return
+        if (is_p1 and turn == 'p2') or (is_p2 and turn == 'p1'):
             await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", "guess": "invalid_guess"})
-        elif game_states[self.room_name]['players']['player2'].username == self.user.username and game_states[self.room_name]['turn'] == 'p1':
-            print('wrong person sending word, should be p1')
-            await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", "guess": "invalid_guess"})
-        elif self.validate_guess(message) and message != game_states[self.room_name]['word_choice'] and not game_states[self.room_name]['p1_solved']:
-            await self.channel_layer.send(self.channel_name, 
-                                          {"type": "game.update_dom", 
-                                           "guess": message, 
-                                           "how_to_update_dom": 
-                                           self.validation_pattern(message, game_states[self.room_name]['word_choice'])})
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
-                                                                       "how_to_update_dom": 
-                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                                       "sender": self.channel_name})
-            game_states[self.room_name]['turn'] = 'p1' if game_states[self.room_name]['turn'] == 'p2' else 'p2'
-        elif message == game_states[self.room_name]['word_choice'] and game_states[self.room_name]['turn'] == 'p1':
-            game_states[self.room_name]['p1_solved'] = True
-            game_states[self.room_name]['turn'] = 'p2'
-            await self.channel_layer.send(self.channel_name, 
-                                          {"type": "game.update_dom", 
-                                           "guess": message, 
-                                           "how_to_update_dom": 
-                                           self.validation_pattern(message, game_states[self.room_name]['word_choice'])})
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
-                                                                       "how_to_update_dom": 
-                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                                       "sender": self.channel_name})
-        elif game_states[self.room_name]['p1_solved'] and game_states[self.room_name]['turn'] == 'p2' and message == game_states[self.room_name]['word_choice']:
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_dom", 
-                                                              "guess": message, 
-                                                              "how_to_update_dom": 
-                                                              self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                              "draw": True})
-            del game_states[self.room_name]
-            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
-            print("Draw!")
-        elif game_states[self.room_name]['p1_solved'] and game_states[self.room_name]['turn'] == 'p2' and message != game_states[self.room_name]['word_choice']:
-            await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", 
-                                                              "guess": message, 
-                                                              "how_to_update_dom": 
-                                                              self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                              "winner": False})
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
-                                                                       "how_to_update_dom": 
-                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                                       "sender": self.channel_name,
-                                                                       "winner": True}) ##everyone BUT the sender gets this update
-            del game_states[self.room_name]
-            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
-            print("Solved!")
-        elif message == game_states[self.room_name]['word_choice'] and game_states[self.room_name]['turn'] == 'p2':
-            await self.channel_layer.send(self.channel_name, {"type": "game.update_dom", 
-                                                              "guess": message, 
-                                                              "how_to_update_dom": 
-                                                              self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                              "winner": True})
-            await self.channel_layer.group_send(self.room_group_name, {"type": "game.update_secondary_dom", 
-                                                                       "how_to_update_dom": 
-                                                                       self.validation_pattern(message, game_states[self.room_name]['word_choice']),
-                                                                       "sender": self.channel_name,
-                                                                       "winner": False}) ##everyone BUT the sender gets this update
-            del game_states[self.room_name]
-            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
-            print("Solved!")
-       
+            return
 
+        pattern = self.validation_pattern(message, word)
+        solved = message == word
 
-        
-    async def chat_message(self, event):
-        message = event['message']
+        if not solved and not p1_solved:
+            # Ordinary wrong guess: color both boards and pass the turn.
+            await self.channel_layer.send(self.channel_name, {
+                "type": "game.update_dom", "guess": message, "how_to_update_dom": pattern,
+            })
+            await self.channel_layer.group_send(self.room_group_name, {
+                "type": "game.update_secondary_dom", "how_to_update_dom": pattern, "sender": self.channel_name,
+            })
+            await game_store.update(self.room_name, turn=('p1' if turn == 'p2' else 'p2'))
 
-        #send message to WebSocket
-        await self.send(text_data = json.dumps({"message": message}))
-    
+        elif solved and turn == 'p1':
+            # p1 solves first: give p2 one final turn to force a draw.
+            await game_store.update(self.room_name, p1_solved=True, turn='p2')
+            await self.channel_layer.send(self.channel_name, {
+                "type": "game.update_dom", "guess": message, "how_to_update_dom": pattern,
+            })
+            await self.channel_layer.group_send(self.room_group_name, {
+                "type": "game.update_secondary_dom", "how_to_update_dom": pattern, "sender": self.channel_name,
+            })
+
+        elif p1_solved and turn == 'p2' and solved:
+            # p2 also solves -> draw.
+            await self.channel_layer.group_send(self.room_group_name, {
+                "type": "game.update_dom", "guess": message, "how_to_update_dom": pattern, "draw": True,
+            })
+            await game_store.delete_game(self.room_name)
+            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
+
+        elif p1_solved and turn == 'p2' and not solved:
+            # p2 misses their final chance -> p1 wins.
+            await self.channel_layer.send(self.channel_name, {
+                "type": "game.update_dom", "guess": message, "how_to_update_dom": pattern, "winner": False,
+            })
+            await self.channel_layer.group_send(self.room_group_name, {
+                "type": "game.update_secondary_dom", "how_to_update_dom": pattern, "sender": self.channel_name, "winner": True,
+            })
+            await game_store.delete_game(self.room_name)
+            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
+
+        elif solved and turn == 'p2':
+            # p2 solves while p1 hadn't yet -> p2 wins.
+            await self.channel_layer.send(self.channel_name, {
+                "type": "game.update_dom", "guess": message, "how_to_update_dom": pattern, "winner": True,
+            })
+            await self.channel_layer.group_send(self.room_group_name, {
+                "type": "game.update_secondary_dom", "how_to_update_dom": pattern, "sender": self.channel_name, "winner": False,
+            })
+            await game_store.delete_game(self.room_name)
+            await self.channel_layer.group_send(self.room_group_name, {"type": "chat.disconnect", "message": "The game is over!"})
+
     async def game_update_dom(self, event):
-        await self.send(text_data = json.dumps(event))
+        await self.send(text_data=json.dumps(event))
 
     async def game_update_secondary_dom(self, event):
-        sender = event['sender']
-        if sender != self.channel_name:
-            await self.send(text_data = json.dumps(event))
+        if event['sender'] != self.channel_name:
+            await self.send(text_data=json.dumps(event))
 
     async def chat_disconnect(self, event):
         await self.close()

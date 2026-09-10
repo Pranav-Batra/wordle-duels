@@ -235,13 +235,9 @@
                     }
                 }
             } 
-            else if (data.word_choice) 
+            else if (data.status === "connected")
             {
-                console.log('Word Selected');
-            } 
-            else if (data.message) 
-            {
-                console.log("Room already has a word");
+                console.log(`Connected as ${data.player}`);
             }
             if (data.type === 'game.update_secondary_dom') 
             {

@@ -23,6 +23,9 @@ import logging
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 redis_url = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+# Exposed for chat.game_store, which keeps shared game/lobby state in Redis
+# so state survives restarts and is consistent across worker processes.
+REDIS_URL = redis_url
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
